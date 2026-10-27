@@ -1,0 +1,54 @@
+---
+- name: Set up Jenkins + SonarQube server
+  hosts: tools
+  become: true
+  tasks:
+    - name: Install Docker and Compose plugin
+      apt:
+        name: [docker.io, docker-compose-v2]
+        state: present
+        update_cache: true
+
+    - name: Start Docker
+      service:
+        name: docker
+        state: started
+        enabled: true
+
+    - name: SonarQube needs a bigger vm.max_map_count (persistent)
+      copy:
+        dest: /etc/sysctl.d/99-sonarqube.conf
+        content: "vm.max_map_count=262144\n"
+
+    - name: Apply sysctl now
+      command: sysctl -w vm.max_map_count=262144
+      changed_when: false
+
+    - name: Create directories
+      file:
+        path: /opt/tools/jenkins
+        state: directory
+
+    - name: Copy Jenkins Dockerfile
+      copy:
+        src: "{{ playbook_dir }}/../jenkins/Dockerfile"
+        dest: /opt/tools/jenkins/Dockerfile
+
+    - name: Copy compose file
+      copy:
+        src: files/tools-compose.yml
+        dest: /opt/tools/docker-compose.yml
+
+    - name: Start Jenkins and SonarQube
+      command: docker compose up -d --build
+      args:
+        chdir: /opt/tools
+
+    - name: Wait for Jenkins login page
+      uri:
+        url: http://localhost:8080/login
+        status_code: [200, 403]
+      register: j
+      until: j.status in [200, 403]
+      retries: 40
+      delay: 6

@@ -1,0 +1,66 @@
+---
+- name: Install k3s (Kubernetes) and deploy app + Prometheus + Grafana
+  hosts: k8s
+  become: true
+  vars:
+    app_image: "{{ lookup('env', 'APP_IMAGE') }}"
+    grafana_password: "{{ lookup('env', 'GRAFANA_PASSWORD') | default('admin', true) }}"
+    kc: /usr/local/bin/k3s kubectl
+
+  tasks:
+    - name: Fail early if APP_IMAGE is not set
+      assert:
+        that: app_image | length > 0
+        fail_msg: "Set APP_IMAGE, e.g. APP_IMAGE=youruser/vehicle-rental:latest"
+
+    - name: Install k3s
+      shell: curl -sfL https://get.k3s.io | sh -
+      args:
+        creates: /usr/local/bin/k3s
+
+    - name: Wait for node Ready
+      command: "{{ kc }} wait --for=condition=Ready node --all --timeout=180s"
+      changed_when: false
+
+    - name: Create work dir
+      file:
+        path: /opt/rental
+        state: directory
+
+    - name: Copy Grafana dashboard JSON
+      copy:
+        src: "{{ playbook_dir }}/../monitoring/grafana/dashboards/rental.json"
+        dest: /opt/rental/rental.json
+
+    - name: Render Kubernetes manifest
+      template:
+        src: k8s.yaml.j2
+        dest: /opt/rental/k8s.yaml
+
+    - name: Create namespace
+      shell: "{{ kc }} create namespace rental --dry-run=client -o yaml | {{ kc }} apply -f -"
+
+    - name: Create dashboard ConfigMap
+      shell: >
+        {{ kc }} -n rental create configmap grafana-dashboards
+        --from-file=rental.json=/opt/rental/rental.json
+        --dry-run=client -o yaml | {{ kc }} apply -f -
+
+    - name: Apply manifest
+      command: "{{ kc }} apply -f /opt/rental/k8s.yaml"
+
+    - name: Restart app so the newest image is used
+      command: "{{ kc }} -n rental rollout restart deployment/app"
+
+    - name: Wait for rollout
+      command: "{{ kc }} -n rental rollout status deployment/app --timeout=240s"
+      changed_when: false
+
+    - name: Wait for app health through NodePort
+      uri:
+        url: http://localhost:30500/health
+        status_code: 200
+      register: r
+      until: r.status == 200
+      retries: 20
+      delay: 5

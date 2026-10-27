@@ -1,0 +1,30 @@
+# Local development: builds the app image from source
+services:
+  app:
+    build:
+      context: .
+      target: final
+    ports: ["5000:5000"]
+    volumes: [app-data:/data]
+    restart: unless-stopped
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    ports: ["9090:9090"]
+    volumes: ["./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro"]
+    restart: unless-stopped
+  node-exporter:
+    image: prom/node-exporter:v1.8.1
+    restart: unless-stopped
+  grafana:
+    image: grafana/grafana:11.1.0
+    ports: ["3000:3000"]
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    restart: unless-stopped
+volumes:
+  app-data:
+  grafana-data:

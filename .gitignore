@@ -1,0 +1,7 @@
+node_modules/
+dist/
+data/
+*.tfstate*
+.terraform/
+ansible/inventory.ini
+ansible/jenkins_inventory.ini
